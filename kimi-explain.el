@@ -364,6 +364,10 @@ plist 格式见文件注释。"
      ((string-match-p "sh\\|shell" name) "bash")
      (t (replace-regexp-in-string "-mode\\'" "" name)))))
 
+(defun kimi-explain--quote-block (text)
+  "把 TEXT 的每行加上 `> ' 前缀，作为 markdown 引用块展示（与回答正文区分）。"
+  (concat "> " (string-join (split-string text "\n") "\n> ")))
+
 ;;;###autoload
 (defun kimi-explain-region (beg end)
   "用当前后端解释选中的区域 (BEG END)，结果实时显示到 *ai-explain* buffer.
@@ -380,9 +384,10 @@ plist 格式见文件注释。"
                          file lang start-line end-line lang code))
          (source (current-buffer)))
     (kimi-explain--insert
-     (format "## 解释 %s:%d-%d\n\n```%s\n%s\n```\n\n"
-             (file-name-nondirectory file) start-line end-line lang
-             (string-trim-right code)))
+     (format "## 解释 %s:%d-%d\n\n%s\n\n"
+             (file-name-nondirectory file) start-line end-line
+             (kimi-explain--quote-block
+              (format "```%s\n%s\n```" lang (string-trim-right code)))))
     (deactivate-mark)
     (kimi-explain--send prompt source)))
 
@@ -392,7 +397,9 @@ plist 格式见文件注释。"
   (interactive "s提问: ")
   (when (string-blank-p question)
     (user-error "问题不能为空"))
-  (kimi-explain--insert (format "## 追问\n\n%s\n\n" question))
+  ;; 问题用 > 引用块展示，与回答正文区分开
+  (kimi-explain--insert
+   (format "## 追问\n\n%s\n\n" (kimi-explain--quote-block question)))
   (kimi-explain--send question))
 
 ;;;###autoload

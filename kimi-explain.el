@@ -108,6 +108,11 @@
 (defvar-local kimi-explain--busy nil
   "非 nil 表示后端正在回复中（一轮提问尚未结束）.")
 
+(defvar-local kimi-explain--pi-saw-text nil
+  "非 nil 表示当前这条 assistant 消息已经流过文本（pi 后端用）.
+工具调用回合的 assistant 消息没有文本，其 message_end 不应补换行，
+否则等待工具执行期间 buffer 里会多出空行。")
+
 ;;; ACP 通用后端（常驻进程）
 ;;
 ;; ACP (Agent Client Protocol) 是编辑器与 AI agent 之间的开放协议（地位
@@ -426,13 +431,20 @@
         ("message_update"
          (let ((ev (alist-get 'assistantMessageEvent obj)))
            (when (equal (alist-get 'type ev) "text_delta")
-             (kimi-explain--insert (alist-get 'delta ev)))))
+             (let ((delta (alist-get 'delta ev)))
+               (when (and (stringp delta) (not (string-empty-p delta)))
+                 (setq kimi-explain--pi-saw-text t)
+                 (kimi-explain--insert delta))))))
         ("message_end"
-         (let ((msg (alist-get 'message obj)))
-           (when (equal (alist-get 'role msg) "assistant")
-             (kimi-explain--insert "\n"))))
+         ;; 只给真正流过文本的 assistant 消息补换行；纯工具调用的
+         ;; assistant 消息不补，否则等待期间 buffer 里会多出空行
+         (when (and (equal (alist-get 'role (alist-get 'message obj)) "assistant")
+                    kimi-explain--pi-saw-text)
+           (setq kimi-explain--pi-saw-text nil)
+           (kimi-explain--insert "\n")))
         ;; 一轮结束（正常完成或 abort 收尾都会到达）
         ("agent_settled"
+         (setq kimi-explain--pi-saw-text nil)
          (when-let ((proc kimi-explain--process))
            (process-put proc 'cancel-pending nil))
          (kimi-explain--turn-done))))))
@@ -461,11 +473,16 @@
           ("message_update"
            (let ((ev (alist-get 'assistantMessageEvent obj)))
              (when (equal (alist-get 'type ev) "text_delta")
-               (kimi-explain--insert (alist-get 'delta ev)))))
+               (let ((delta (alist-get 'delta ev)))
+                 (when (and (stringp delta) (not (string-empty-p delta)))
+                   (setq kimi-explain--pi-saw-text t)
+                   (kimi-explain--insert delta))))))
           ("message_end"
-           (let ((msg (alist-get 'message obj)))
-             (when (equal (alist-get 'role msg) "assistant")
-               (kimi-explain--insert "\n"))))))
+           ;; 只给真正流过文本的 assistant 消息补换行（同上，避免空行）
+           (when (and (equal (alist-get 'role (alist-get 'message obj)) "assistant")
+                      kimi-explain--pi-saw-text)
+             (setq kimi-explain--pi-saw-text nil)
+             (kimi-explain--insert "\n")))))
     (error
      ;; 不是合法 JSON（比如警告信息），原样显示
      (kimi-explain--insert (concat line "\n")))))

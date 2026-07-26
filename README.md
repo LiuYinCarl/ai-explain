@@ -2,6 +2,12 @@
 
 在 Emacs 里选中代码，一键让 AI CLI（kimi / pi）用中文解释，并在专用 buffer 中实时展示回答、持续追问。
 
+
+
+https://github.com/user-attachments/assets/4342856e-86d5-404a-a6fa-fc8391af4d16
+
+
+
 ## 特性
 
 - **选中即解释**：`C-c k e` 把选中的代码连同文件名、语言、行号一起发给 AI，prompt 要求"先概括、按主流程讲解、控制篇幅不发散"

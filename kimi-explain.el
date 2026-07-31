@@ -1,4 +1,4 @@
-;;; kimi-explain.el --- 用 AI CLI (kimi / pi) 解释代码并持续追问 -*- lexical-binding: t; -*-
+;;; kimi-explain.el --- 用 AI CLI (kimi / pi / codex) 解释代码并持续追问 -*- lexical-binding: t; -*-
 
 ;; 依赖: 本机已安装并登录 kimi CLI (https://www.kimi.com/code/docs/)
 ;;       或 pi CLI。账号验证由 CLI 自己负责，本插件不参与。
@@ -26,13 +26,14 @@
 
 (defcustom kimi-explain-backend 'kimi
   "使用的后端 CLI.
-内置 `kimi'（ACP 常驻）和 `pi'（rpc 常驻）两个默认后端，以及
-`kimi-oneshot'、`pi-oneshot' 两个一次性保底后端；也可以在
+内置 `kimi'（ACP 常驻）、`pi'（rpc 常驻）、`codex'（一次性）三个默认后端，
+以及 `kimi-oneshot'、`pi-oneshot' 两个一次性保底后端；也可以在
 `kimi-explain-backends' 里添加自己的后端后把此变量设为对应的名字。"
   :type '(choice (const :tag "Kimi Code CLI (ACP 常驻)" kimi)
                  (const :tag "Kimi Code CLI (一次性，保底)" kimi-oneshot)
                  (const :tag "pi CLI (rpc 常驻)" pi)
                  (const :tag "pi CLI (一次性，保底)" pi-oneshot)
+                 (const :tag "codex CLI (一次性，JSONL)" codex)
                  (symbol :tag "自定义后端")))
 
 (defcustom kimi-explain-buffer-name "*ai-explain*"
@@ -487,6 +488,37 @@
      ;; 不是合法 JSON（比如警告信息），原样显示
      (kimi-explain--insert (concat line "\n")))))
 
+;;; codex 后端（一次性，JSONL）
+;;
+;; codex CLI 没有 ACP 模式，走 `codex exec --json' 一次性进程：
+;; stdout 是 JSONL 事件流，thread.started 给出 thread_id（即会话 id），
+;; 回答在 item.completed 的 agent_message 里一次性给出（非流式）；
+;; 追问用 `codex exec resume --json <id> <prompt>' 续接会话。
+
+(defun kimi-explain--codex-build-args (prompt)
+  "codex 后端： 构造参数，已有会话则用 exec resume 续接."
+  (if kimi-explain--session-id
+      (list "exec" "resume" "--json" "--skip-git-repo-check"
+            kimi-explain--session-id prompt)
+    (list "exec" "--json" "--skip-git-repo-check" prompt)))
+
+(defun kimi-explain--codex-handle-line (line)
+  "codex 后端： 解析 JSONL 事件，捕获 thread_id、取 agent_message 正文."
+  (condition-case nil
+      (let ((obj (json-read-from-string line)))
+        (pcase (alist-get 'type obj)
+          ("thread.started"
+           (setq kimi-explain--session-id (alist-get 'thread_id obj)))
+          ("item.completed"
+           (let ((item (alist-get 'item obj)))
+             (when (equal (alist-get 'type item) "agent_message")
+               (let ((text (alist-get 'text item)))
+                 (when (and (stringp text) (not (string-blank-p text)))
+                   (kimi-explain--insert (concat text "\n")))))))))
+    (error
+     ;; 不是合法 JSON（比如警告信息），原样显示
+     (kimi-explain--insert (concat line "\n")))))
+
 (defcustom kimi-explain-backends
   `((kimi :command "kimi"
           :acp t
@@ -505,7 +537,10 @@
     (pi-oneshot
           :command "pi"
           :build-args ,#'kimi-explain--pi-oneshot-build-args
-          :handle-line ,#'kimi-explain--pi-oneshot-handle-line))
+          :handle-line ,#'kimi-explain--pi-oneshot-handle-line)
+    (codex :command "codex"
+           :build-args ,#'kimi-explain--codex-build-args
+           :handle-line ,#'kimi-explain--codex-handle-line))
   "可用的后端 CLI 列表，元素为 (名字 . plist).
 plist 格式见文件注释。"
   :type '(alist :key-type symbol :value-type sexp))
@@ -560,17 +595,29 @@ plist 格式见文件注释。"
 ;; mode 定义在下方的 if 分支里，编译器看不到，先声明
 (declare-function kimi-explain-mode "kimi-explain")
 
+(defun kimi-explain--mode-line ()
+  "mode-line 片段：显示当前后端，回复中时附带状态提示."
+  (if kimi-explain--busy
+      (format " [%s:回复中]" kimi-explain-backend)
+    (format " [%s]" kimi-explain-backend)))
+
 (if (and kimi-explain-use-markdown-mode (require 'markdown-mode nil t))
     (define-derived-mode kimi-explain-mode markdown-mode "AI-Explain"
       "展示 AI 对话内容的 major mode（只读，基于 markdown-mode）.
 \\{kimi-explain-mode-map}"
       (read-only-mode 1)
-      (visual-line-mode 1))
+      (visual-line-mode 1)
+      (setq-local mode-line-format
+                  (append (default-value 'mode-line-format)
+                          '((:eval (kimi-explain--mode-line))))))
   (define-derived-mode kimi-explain-mode special-mode "AI-Explain"
     "展示 AI 对话内容的 major mode（只读，基于 special-mode）.
 \\{kimi-explain-mode-map}"
     (read-only-mode 1)
-    (visual-line-mode 1)))
+    (visual-line-mode 1)
+    (setq-local mode-line-format
+                (append (default-value 'mode-line-format)
+                        '((:eval (kimi-explain--mode-line)))))))
 
 (defun kimi-explain--get-buffer ()
   "返回 *ai-explain* buffer，不存在则创建."
@@ -769,6 +816,7 @@ plist 格式见文件注释。"
               (unless (executable-find command)
                 (user-error "找不到命令 `%s'，请确认后端 CLI 已安装且在 PATH 中"
                             command))
+              (message "kimi-explain: 正在用后端 `%s' 回答…" kimi-explain-backend)
               (if (plist-get backend :persistent)
                   ;; 常驻模式：复用长驻进程；握手未完成时 :send-prompt 自行排队
                   (let ((proc (funcall (plist-get backend :ensure-process))))

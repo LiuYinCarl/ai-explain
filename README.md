@@ -13,9 +13,10 @@ https://github.com/user-attachments/assets/4342856e-86d5-404a-a6fa-fc8391af4d16
 - **选中即解释**：`C-c k e` 把选中的代码连同文件名、语言、行号一起发给 AI，prompt 要求"先概括、按主流程讲解、控制篇幅不发散"
 - **持续追问**：所有提问在同一个会话中进行，上下文不丢。可以选中另一段代码再按 `C-c k e`，或按 `a` 直接输入问题
 - **常驻进程**：kimi（ACP）和 pi（rpc）后端都走长连接，进程只启动一次，追问没有重复加载的开销；进程生命周期（启动、握手、掉线重启恢复）完全由插件管理
-- **可插拔后端**：内置 kimi（ACP 常驻）、pi（rpc 常驻）及各自的 oneshot 保底后端，通过统一的 plist 接口抽象（ACP / 一次性 / 自定义常驻三种模式）；接入任何一个 ACP agent 只需一行声明
+- **可插拔后端**：内置 kimi（ACP 常驻）、pi（rpc 常驻）、codex（一次性）及 kimi/pi 各自的 oneshot 保底后端，通过统一的 plist 接口抽象（ACP / 一次性 / 自定义常驻三种模式）；接入任何一个 ACP agent 只需一行声明
 - **实时反馈**：等待时显示旋转动画（`⠋ 思考中…`），回答逐 token 流式输出
 - **markdown 渲染**：对话 buffer 默认使用 markdown-mode（只读），标题和代码块有语法高亮
+- **后端可见**：`*ai-explain*` 的 mode-line 常驻显示当前后端（回复中时显示 `[kimi:回复中]`），提问时 minibuffer 也会提示一次
 - **零账号处理**：登录、鉴权完全由 CLI 自己负责，插件不碰任何 token
 
 ## 依赖
@@ -24,6 +25,7 @@ https://github.com/user-attachments/assets/4342856e-86d5-404a-a6fa-fc8391af4d16
 - 以下任一 CLI，且已在终端登录可用：
   - [kimi CLI](https://www.kimi.com/code/docs/)（默认后端，使用 `kimi acp` 常驻模式）
   - pi CLI（使用 `--mode rpc` 常驻模式）
+  - codex CLI（使用 `codex exec --json` 一次性模式，追问走 `codex exec resume` 续接会话）
 - 可选：`markdown-mode`（装了就用，没装自动回退 special-mode）
 
 ## 安装
@@ -89,7 +91,7 @@ buffer 是只读的，这些单字母键不会干扰任何文本输入；提问�
 ## 配置项
 
 ```elisp
-;; 默认后端（内置 kimi、kimi-oneshot、pi、pi-oneshot 四个）
+;; 默认后端（内置 kimi、kimi-oneshot、pi、pi-oneshot、codex 五个）
 (setq kimi-explain-backend 'pi)
 
 ;; 对话 buffer 名字
@@ -171,6 +173,7 @@ ACP（[Agent Client Protocol](https://agentclientprotocol.com)）是编辑器与
 | `kimi-oneshot` | 一次性（保底） | `kimi [--session id] -p PROMPT --output-format stream-json` | 每行一个 JSON；`role=assistant` 取 `content`，`type=session.resume_hint` 取 `session_id` |
 | `pi` | rpc 常驻 | `pi --mode rpc --session-id ID`（pi 私有 JSON 行协议） | `message_update/text_delta` 取增量（真流式），`agent_settled` 结束一轮；`abort` 支持优雅停止 |
 | `pi-oneshot` | 一次性（保底） | `pi --session-id ID -p PROMPT --mode json` | JSON 事件流；`message_update/text_delta` 取增量，`message_end` 换行 |
+| `codex` | 一次性 | `codex exec [--skip-git-repo-check] --json PROMPT` / 追问走 `codex exec resume --json ID PROMPT` | JSONL 事件流；`thread.started` 取 `thread_id`，`item.completed` 的 `agent_message` 取正文（非流式） |
 
 `kimi-oneshot` / `pi-oneshot` 是常驻模式之前的旧机制，保留作保底：常驻模式出问题时 `(setq kimi-explain-backend 'kimi-oneshot)`（或 `'pi-oneshot`）、按 `b` 切换即可，代价是每次提问都要重启进程；kimi 一次性后端的回答还非流式。
 

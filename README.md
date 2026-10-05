@@ -1,4 +1,4 @@
-# kimi-explain.el
+# emacs-ai-explain.el
 
 在 Emacs 里选中代码，一键让 AI CLI（kimi / pi）用中文解释，并在专用 buffer 中实时展示回答、持续追问。
 
@@ -30,28 +30,28 @@ https://github.com/user-attachments/assets/4342856e-86d5-404a-a6fa-fc8391af4d16
 
 ## 安装
 
-把 `kimi-explain.el` 放到任意目录（比如 `~/dev/github/kimi-explain/`），然后在 init 文件中：
+把 `emacs-ai-explain.el` 放到任意目录（比如 `~/dev/github/emacs-ai-explain/`），然后在 init 文件中：
 
 ```elisp
-(use-package kimi-explain
+(use-package emacs-ai-explain
   :ensure nil
-  :load-path "~/dev/github/kimi-explain"
+  :load-path "~/dev/github/emacs-ai-explain"
   :init
   (which-key-add-key-based-replacements   ; 可选，需要 which-key
-    "C-c k"   "kimi-explain"
+    "C-c k"   "emacs-ai-explain"
     "C-c k e" "解释选中代码"
     "C-c k a" "追问")
-  :bind (("C-c k e" . kimi-explain-region)
-         ("C-c k a" . kimi-ask)))
+  :bind (("C-c k e" . emacs-ai-explain-region)
+         ("C-c k a" . emacs-ai-explain-ask)))
 ```
 
 不用 use-package 的话：
 
 ```elisp
-(add-to-list 'load-path "~/dev/github/kimi-explain")
-(require 'kimi-explain)
-(global-set-key (kbd "C-c k e") #'kimi-explain-region)
-(global-set-key (kbd "C-c k a") #'kimi-ask)
+(add-to-list 'load-path "~/dev/github/emacs-ai-explain")
+(require 'emacs-ai-explain)
+(global-set-key (kbd "C-c k e") #'emacs-ai-explain-region)
+(global-set-key (kbd "C-c k a") #'emacs-ai-explain-ask)
 ```
 
 ## 用法
@@ -82,27 +82,27 @@ buffer 是只读的，这些单字母键不会干扰任何文本输入；提问�
 
 | 命令 | 作用 |
 |------|------|
-| `kimi-explain-region` | 解释选中区域 |
-| `kimi-ask` | 自由提问（续接当前会话） |
-| `kimi-explain-stop` | 停止当前回复 |
-| `kimi-explain-new-session` | 开启新会话 |
-| `kimi-explain-switch-backend` | 交互式切换后端 |
+| `emacs-ai-explain-region` | 解释选中区域 |
+| `emacs-ai-explain-ask` | 自由提问（续接当前会话） |
+| `emacs-ai-explain-stop` | 停止当前回复 |
+| `emacs-ai-explain-new-session` | 开启新会话 |
+| `emacs-ai-explain-switch-backend` | 交互式切换后端 |
 
 ## 配置项
 
 ```elisp
 ;; 默认后端（内置 kimi、kimi-oneshot、pi、pi-oneshot、codex 五个）
-(setq kimi-explain-backend 'pi)
+(setq emacs-ai-explain-backend 'pi)
 
 ;; 对话 buffer 名字
-(setq kimi-explain-buffer-name "*ai-explain*")
+(setq emacs-ai-explain-buffer-name "*ai-explain*")
 
 ;; 设为 nil 则不使用 markdown-mode（回退 special-mode）
-(setq kimi-explain-use-markdown-mode nil)
+(setq emacs-ai-explain-use-markdown-mode nil)
 
 ;; 解释代码用的 prompt 模板，6 个 % 依次是：
 ;; 文件路径、语言、起始行、结束行、代码块语言标识、代码内容
-(setq kimi-explain-prompt-template "请用中文解释以下代码……")
+(setq emacs-ai-explain-prompt-template "请用中文解释以下代码……")
 ```
 
 ## 设计
@@ -112,9 +112,9 @@ buffer 是只读的，这些单字母键不会干扰任何文本输入；提问�
 ```
 Emacs                          CLI 进程
 ─────                          ────────
-kimi-explain-region / kimi-ask
+emacs-ai-explain-region / emacs-ai-explain-ask
   └─ 构造 prompt（文件、语言、行号、代码）
-  └─ kimi-explain--send
+  └─ emacs-ai-explain--send
        ├─ 启动 spinner 动画
        ├─ 常驻模式: 复用长驻进程（首次自动启动+握手）
        └─ 一次性模式: make-process: pi -p …
@@ -140,7 +140,7 @@ kimi-explain-region / kimi-ask
 
 ### 后端抽象
 
-每个后端是 `kimi-explain-backends` 里的一个 plist，支持三种声明方式：
+每个后端是 `emacs-ai-explain-backends` 里的一个 plist，支持三种声明方式：
 
 ```elisp
 ;; 1. ACP 模式：任何实现了 Agent Client Protocol 的 agent，一行接入
@@ -159,7 +159,7 @@ kimi-explain-region / kimi-ask
       :persistent     t
       :ensure-process (lambda () …)          ; 返回长驻进程（可异步握手，未就绪时 send-prompt 自行排队）
       :send-prompt    (lambda (proc prompt) …)
-      :handle-line    (lambda (line) …)      ; 一轮回复结束（含出错）时调用 kimi-explain--turn-done
+      :handle-line    (lambda (line) …)      ; 一轮回复结束（含出错）时调用 emacs-ai-explain--turn-done
       :cancel         (lambda (proc) …))     ; 可选：中断当前回复但不杀进程（如 pi 的 abort）
 ```
 
@@ -175,17 +175,17 @@ ACP（[Agent Client Protocol](https://agentclientprotocol.com)）是编辑器与
 | `pi-oneshot` | 一次性（保底） | `pi --session-id ID -p PROMPT --mode json` | JSON 事件流；`message_update/text_delta` 取增量，`message_end` 换行 |
 | `codex` | 一次性 | `codex exec [--skip-git-repo-check] --json PROMPT` / 追问走 `codex exec resume --json ID PROMPT` | JSONL 事件流；`thread.started` 取 `thread_id`，`item.completed` 的 `agent_message` 取正文（非流式） |
 
-`kimi-oneshot` / `pi-oneshot` 是常驻模式之前的旧机制，保留作保底：常驻模式出问题时 `(setq kimi-explain-backend 'kimi-oneshot)`（或 `'pi-oneshot`）、按 `b` 切换即可，代价是每次提问都要重启进程；kimi 一次性后端的回答还非流式。
+`kimi-oneshot` / `pi-oneshot` 是常驻模式之前的旧机制，保留作保底：常驻模式出问题时 `(setq emacs-ai-explain-backend 'kimi-oneshot)`（或 `'pi-oneshot`）、按 `b` 切换即可，代价是每次提问都要重启进程；kimi 一次性后端的回答还非流式。
 
 ### 添加自己的后端
 
 如果 CLI 支持 ACP，一行声明即可：
 
 ```elisp
-(add-to-list 'kimi-explain-backends
+(add-to-list 'emacs-ai-explain-backends
              '(gemini :command "gemini" :acp t :arguments ("--acp")))
 
-(setq kimi-explain-backend 'gemini)
+(setq emacs-ai-explain-backend 'gemini)
 ```
 
 （各 agent 启动 ACP 模式的参数不同，以其官方文档为准。）
@@ -194,19 +194,19 @@ ACP（[Agent Client Protocol](https://agentclientprotocol.com)）是编辑器与
 
 ```elisp
 (defun my-foo-build-args (prompt)
-  (append (when kimi-explain--session-id
-            (list "--resume" kimi-explain--session-id))
+  (append (when emacs-ai-explain--session-id
+            (list "--resume" emacs-ai-explain--session-id))
           (list "chat" prompt)))
 
 (defun my-foo-handle-line (line)
-  (kimi-explain--insert (concat line "\n")))
+  (emacs-ai-explain--insert (concat line "\n")))
 
-(add-to-list 'kimi-explain-backends
+(add-to-list 'emacs-ai-explain-backends
              `(foo :command "foo"
                    :build-args ,#'my-foo-build-args
                    :handle-line ,#'my-foo-handle-line))
 
-(setq kimi-explain-backend 'foo)
+(setq emacs-ai-explain-backend 'foo)
 ```
 
 不支持会话续接的 CLI 也可以接：`:build-args` 忽略 session id 即可，只是每次提问都没有上下文。
@@ -226,7 +226,7 @@ ACP（[Agent Client Protocol](https://agentclientprotocol.com)）是编辑器与
 ## 文件
 
 ```
-kimi-explain/
-├── kimi-explain.el    ; 全部代码（单文件，约 900 行）
+emacs-ai-explain/
+├── emacs-ai-explain.el    ; 全部代码（单文件，约 900 行）
 └── README.md
 ```

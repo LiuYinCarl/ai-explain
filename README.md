@@ -16,6 +16,8 @@ https://github.com/user-attachments/assets/4342856e-86d5-404a-a6fa-fc8391af4d16
 - **可插拔后端**：内置 kimi（ACP 常驻）、pi（rpc 常驻）、codex（一次性）及 kimi/pi 各自的 oneshot 保底后端，通过统一的 plist 接口抽象（ACP / 一次性 / 自定义常驻三种模式）；接入任何一个 ACP agent 只需一行声明
 - **实时反馈**：等待时显示旋转动画（`⠋ 思考中…`），回答逐 token 流式输出
 - **markdown 渲染**：对话 buffer 默认使用 markdown-mode（只读），标题和代码块有语法高亮
+- **标记符号隐藏**：默认隐藏 `##` 标题层级、`**` 强调、代码围栏等 markdown 标记符号，只保留渲染后的效果（`ai-explain-hide-markup` 可关）
+- **快速跳转**：`M-p` / `M-n` 在 `*ai-explain*` buffer 里跳到上一个/下一个用户输入，长对话回看不用手动翻
 - **后端可见**：`*ai-explain*` 的 mode-line 常驻显示当前后端（回复中时显示 `[kimi:回复中]`），提问时 minibuffer 也会提示一次
 - **零账号处理**：登录、鉴权完全由 CLI 自己负责，插件不碰任何 token
 
@@ -80,10 +82,12 @@ https://github.com/user-attachments/assets/4342856e-86d5-404a-a6fa-fc8391af4d16
 | `s` | 停止当前正在进行的回复 |
 | `n` | 丢弃上下文，开启新会话 |
 | `b` | 切换后端（kimi / pi / 自定义），并开新会话 |
+| `M-p` | 跳到上一个用户输入（`## 解释` / `## 追问`） |
+| `M-n` | 跳到下一个用户输入 |
 | `q` | 关闭窗口 |
 | `?` | 查看全部按键说明 |
 
-buffer 是只读的，这些单字母键不会干扰任何文本输入；提问在 minibuffer 中完成。
+buffer 是只读的，这些键不会干扰任何文本输入；提问在 minibuffer 中完成。`M-p` / `M-n` 只在你发起的「解释 / 追问」块之间跳转（用文本属性标记，不会误跳到 AI 回答里的 markdown 标题）。
 
 ### 命令一览
 
@@ -94,6 +98,8 @@ buffer 是只读的，这些单字母键不会干扰任何文本输入；提问�
 | `ai-explain-stop` | 停止当前回复 |
 | `ai-explain-new-session` | 开启新会话 |
 | `ai-explain-switch-backend` | 交互式切换后端 |
+| `ai-explain-goto-prev-input` | 跳到上一个用户输入 |
+| `ai-explain-goto-next-input` | 跳到下一个用户输入 |
 
 ## 配置项
 
@@ -106,6 +112,10 @@ buffer 是只读的，这些单字母键不会干扰任何文本输入；提问�
 
 ;; 设为 nil 则不使用 markdown-mode（回退 special-mode）
 (setq ai-explain-use-markdown-mode nil)
+
+;; 默认隐藏 markdown 标记符号（`##` 标题层级、`**` 强调、代码围栏等），
+;; 只保留渲染后的效果；设为 nil 则连同符号一起显示原始 markdown
+(setq ai-explain-hide-markup nil)
 
 ;; 解释代码用的 prompt 模板，6 个 % 依次是：
 ;; 文件路径、语言、起始行、结束行、代码块语言标识、代码内容
@@ -222,6 +232,10 @@ ACP（[Agent Client Protocol](https://agentclientprotocol.com)）是编辑器与
 
 发送请求后在 buffer 末尾插入 `⠋ 思考中…`（braille 十帧，0.1s 一换）。第一个内容到达、一轮回复结束、进程退出、用户中断或 buffer 被关闭时都会自动清理，不会残留。
 
+### markdown 标记隐藏
+
+`ai-explain-hide-markup`（默认开）复用 markdown-mode 的 `markdown-hide-markup`：在 `*ai-explain*` buffer 里 buffer-local 地隐藏 `##` 标题层级、`**` 强调、`` ` `` 行内代码、代码块围栏、链接标记等符号，同时保留字体高亮（face）。`>` 引用按 markdown-mode 默认显示为引用条。只影响这个 buffer，其它 markdown buffer 的行为不变。回退到 special-mode（未装 markdown-mode 或 `ai-explain-use-markdown-mode` 为 nil）时不生效。想临时切换可在 buffer 里执行 `M-x markdown-toggle-markup-hiding`。
+
 ### 已知限制
 
 - **CLI 拥有工具权限**：kimi ACP 会话被切到 auto 权限模式、pi 默认带工具，解释代码时它们可能会读取你的项目文件（通常是优点——能结合上下文；不想要可在 `:build-args` 里给 pi-oneshot 加 `--no-tools`）
@@ -229,11 +243,12 @@ ACP（[Agent Client Protocol](https://agentclientprotocol.com)）是编辑器与
 - 按 `s` 停止的实现因后端而异：pi 用 `abort` 优雅中断（进程、会话都保留，中断迟迟不生效时再按一次 `s` 杀进程兜底）；kimi ACP 未实现 `session/cancel`，只能杀进程，session id 已保留，下次提问自动重启并恢复上下文，代价是多一次进程启动
 - ACP 握手有 15 秒看门狗：对端无响应时判定失败并提示（常见原因是 CLI 未登录）
 - 关闭 `*ai-explain*` buffer 会同时结束后端进程，重开后是新会话（会话状态是 buffer-local 的）
+- `M-p` / `M-n` 依据用户输入块上的文本属性跳转：重新加载本文件后，**已打开的旧 `*ai-explain*` buffer** 里历史内容没有该属性，需按 `n` 开新会话、或让新内容插入后才会成为跳转目标
 
 ## 文件
 
 ```
 ai-explain/
-├── ai-explain.el    ; 全部代码（单文件，约 900 行）
+├── ai-explain.el    ; 全部代码（单文件，约 1000 行）
 └── README.md
 ```

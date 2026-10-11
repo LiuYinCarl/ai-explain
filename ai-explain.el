@@ -52,6 +52,16 @@
 否则回退到 special-mode。修改后需要重新加载本文件才生效。"
   :type 'boolean)
 
+(defcustom ai-explain-hide-markup t
+  "非 nil 且使用 markdown-mode 时，隐藏 markdown 标记符号、只保留渲染后的效果。
+被隐藏的是 `##' 标题层级、`**' / `_' 强调、`` ` `` 行内代码、代码块围栏、
+链接标记等；字体高亮（face）不受影响。`>' 引用按 markdown-mode 的默认方式
+显示为引用条。复用 markdown-mode 的 `markdown-hide-markup'，只对
+*ai-explain* buffer 生效，不影响其它 markdown buffer；回退到 special-mode 时无效。
+修改后对新建的 *ai-explain* buffer 生效；已打开的 buffer 需重新初始化本 mode
+（如 `M-x ai-explain-mode`）才生效。"
+  :type 'boolean)
+
 (defcustom ai-explain-prompt-template
   "请用中文解释以下代码。文件：%s（%s，第 %d-%d 行）。
 要求：
@@ -593,6 +603,8 @@ plist 格式见文件注释。"
     (define-key map (kbd "s") #'ai-explain-stop)
     (define-key map (kbd "n") #'ai-explain-new-session)
     (define-key map (kbd "b") #'ai-explain-switch-backend)
+    (define-key map (kbd "M-p") #'ai-explain-goto-prev-input)
+    (define-key map (kbd "M-n") #'ai-explain-goto-next-input)
     (define-key map (kbd "q") #'quit-window)
     (define-key map (kbd "?") #'describe-mode)
     map)
@@ -608,12 +620,25 @@ plist 格式见文件注释。"
       (format " [%s:回复中]" ai-explain-backend)
     (format " [%s]" ai-explain-backend)))
 
+(defun ai-explain--apply-markup-hiding (enable)
+  "在当前 *ai-explain* buffer 中按 ENABLE 打开/关闭 markdown 标记隐藏.
+通过 buffer-local 地设置 markdown-mode 的 `markdown-hide-markup' 实现，只影响
+本 buffer，不动其它 markdown buffer。只在 markdown-mode 可用时调用；无条件
+调用可覆盖全局 `markdown-hide-markup' 或上一次 mode 初始化留下的状态。
+用 `set'+`make-local-variable' 而非 `setq-local'，以免 markdown-mode 未安装时
+在 byte-compile 阶段报 free variable 警告。"
+  (set (make-local-variable 'markdown-hide-markup) enable)
+  (if enable
+      (add-to-invisibility-spec 'markdown-markup)
+    (remove-from-invisibility-spec 'markdown-markup)))
+
 (if (and ai-explain-use-markdown-mode (require 'markdown-mode nil t))
     (define-derived-mode ai-explain-mode markdown-mode "AI-Explain"
       "展示 AI 对话内容的 major mode（只读，基于 markdown-mode）.
 \\{ai-explain-mode-map}"
       (read-only-mode 1)
       (visual-line-mode 1)
+      (ai-explain--apply-markup-hiding ai-explain-hide-markup)
       (setq-local mode-line-format
                   (append (default-value 'mode-line-format)
                           '((:eval (ai-explain--mode-line))))))
@@ -635,14 +660,25 @@ plist 格式见文件注释。"
         (add-hook 'kill-buffer-hook #'ai-explain--kill-buffer-cleanup nil t)
         (current-buffer))))
 
-(defun ai-explain--insert (text)
-  "在 *ai-explain* buffer 末尾插入 TEXT（绕过 read-only），并停掉等待动画。"
+(defconst ai-explain--input-property 'ai-explain-user-input
+  "标记用户输入块的文本属性.
+用户发起的 `## 解释' / `## 追问' 整块（标题及引用内容）都会被打上该属性，
+作为 `ai-explain-goto-prev-input' / `ai-explain-goto-next-input' 的跳转锚点；
+AI 回答不打属性，避免回答里的 markdown 标题被误判。")
+
+(defun ai-explain--insert (text &optional user-input)
+  "在 *ai-explain* buffer 末尾插入 TEXT（绕过 read-only），并停掉等待动画。
+USER-INPUT 非 nil 时给这段文本打上 `ai-explain--input-property' 属性，
+作为前后跳转用户输入的锚点。"
   (with-current-buffer (ai-explain--get-buffer)
     (ai-explain--spinner-stop)
     (let ((inhibit-read-only t))
       (save-excursion
         (goto-char (point-max))
-        (insert text))))
+        (let ((beg (point)))
+          (insert text)
+          (when user-input
+            (put-text-property beg (point) ai-explain--input-property t))))))
   (ai-explain--scroll-to-end))
 
 (defun ai-explain--turn-done ()
@@ -899,7 +935,8 @@ plist 格式见文件注释。"
      (format "## 解释 %s:%d-%d\n\n%s\n\n"
              (file-name-nondirectory file) start-line end-line
              (ai-explain--quote-block
-              (format "```%s\n%s\n```" lang (string-trim-right code)))))
+              (format "```%s\n%s\n```" lang (string-trim-right code))))
+     t)
     (deactivate-mark)
     (ai-explain--send prompt source)))
 
@@ -915,8 +952,66 @@ plist 格式见文件注释。"
   (ai-explain--check-not-busy)
   ;; 问题用 > 引用块展示，与回答正文区分开
   (ai-explain--insert
-   (format "## 追问\n\n%s\n\n" (ai-explain--quote-block question)))
+   (format "## 追问\n\n%s\n\n" (ai-explain--quote-block question))
+   t)
   (ai-explain--send question))
+
+(defun ai-explain--input-anchors ()
+  "返回 buffer 中所有用户输入块起点的位置列表（升序）."
+  (let ((pos (point-min))
+        (anchors nil))
+    ;; 首个块若正好从 point-min 开始，next-single-property-change 只会返回
+    ;; 它的结束边界，故单独判断起点
+    (when (get-text-property pos ai-explain--input-property)
+      (push pos anchors))
+    (while (< pos (point-max))
+      (let ((next (next-single-property-change
+                   pos ai-explain--input-property)))
+        (if (null next)
+            (setq pos (point-max))
+          (when (get-text-property next ai-explain--input-property)
+            (push next anchors))
+          (setq pos next))))
+    (nreverse anchors)))
+
+(defun ai-explain--goto-input (direction)
+  "跳到上一个（DIRECTION < 0）或下一个（DIRECTION > 0）用户输入.
+始终在 *ai-explain* buffer 中定位（即使命令从别处调用）；没有更远的目标时
+只提示，不移动 point。"
+  (with-current-buffer (ai-explain--get-buffer)
+    (let ((here (point))
+          (target nil))
+      (dolist (p (ai-explain--input-anchors))
+        (cond
+         ((> direction 0)
+          (when (and (> p here) (or (null target) (< p target)))
+            (setq target p)))
+         ((< p here)
+          (setq target p))))
+      (if target
+          ;; 在承载该 buffer 的窗口里移动并 recenter（select-window 会用
+          ;; 窗口自己的 point 覆盖 buffer point，所以 goto-char 必须放在
+          ;; with-selected-window 内部，否则从别处调用时会被拉回 point-max）
+          (if-let* ((win (get-buffer-window (current-buffer) t)))
+              (with-selected-window win
+                (goto-char target)
+                (beginning-of-line)
+                (recenter 0))
+            (goto-char target)
+            (beginning-of-line))
+        (message "没有更%s的用户输入" (if (> direction 0) "后" "前"))))))
+
+;;;###autoload
+(defun ai-explain-goto-prev-input ()
+  "跳转到上一个用户输入（`## 解释' / `## 追问'）."
+  (interactive)
+  (ai-explain--goto-input -1))
+
+;;;###autoload
+(defun ai-explain-goto-next-input ()
+  "跳转到下一个用户输入（`## 解释' / `## 追问'）."
+  (interactive)
+  (ai-explain--goto-input 1))
 
 ;;;###autoload
 (defun ai-explain-stop ()

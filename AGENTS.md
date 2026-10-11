@@ -49,8 +49,8 @@ called unconditionally from the mode body so it also overrides a global
 `markdown-hide-markup`). The same function overrides `markdown-list-item-bullets`
 buffer-locally with `ai-explain-list-bullet` (default `•`) so lists don't render with
 markdown-mode's large default bullet `●`. The mode body also does
-`(face-remap-add-relative 'markdown-blockquote-face 'default)` so quote blocks (used for
-the region's quoted code) don't inherit the often-too-dark
+`(face-remap-add-relative 'markdown-blockquote-face 'default)` so any `>` quote blocks
+(e.g. in AI replies) don't inherit the often-too-dark
 `font-lock-doc-face`. All are buffer-local, so other markdown buffers
 are unaffected. It only exists in the `markdown-mode` branch of the mode definition; the
 `special-mode` fallback cannot render, so the option has no effect there.

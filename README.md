@@ -237,7 +237,7 @@ ACP（[Agent Client Protocol](https://agentclientprotocol.com)）是编辑器与
 
 ### markdown 标记隐藏
 
-`ai-explain-hide-markup`（默认开）复用 markdown-mode 的 `markdown-hide-markup`：在 `*ai-explain*` buffer 里 buffer-local 地隐藏 `##` 标题层级、`**` 强调、`` ` `` 行内代码、代码块围栏、链接标记等符号，同时保留字体高亮（face）。`>` 引用按 markdown-mode 默认显示为引用条；列表符号覆盖为 `ai-explain-list-bullet`（默认小圆点 `•`，各层级统一，避免默认的大圆圈 `●`）。此外，代码引用以 `>` 引用块展示，而 markdown-mode 的 `markdown-blockquote-face` 继承 `font-lock-doc-face`（部分主题下偏暗、不易看清），插件在本 buffer 内把它 buffer-local 重映射为 `default`。只影响这个 buffer，其它 markdown buffer 的行为不变。回退到 special-mode（未装 markdown-mode 或 `ai-explain-use-markdown-mode` 为 nil）时不生效。想临时切换可在 buffer 里执行 `M-x markdown-toggle-markup-hiding`。
+`ai-explain-hide-markup`（默认开）复用 markdown-mode 的 `markdown-hide-markup`：在 `*ai-explain*` buffer 里 buffer-local 地隐藏 `##` 标题层级、`**` 强调、`` ` `` 行内代码、代码块围栏、链接标记等符号，同时保留字体高亮（face）。列表符号覆盖为 `ai-explain-list-bullet`（默认小圆点 `•`，各层级统一，避免默认的大圆圈 `●`）。另外，markdown-mode 的 `markdown-blockquote-face` 继承 `font-lock-doc-face`（部分主题下偏暗、不易看清），插件在本 buffer 内把它 buffer-local 重映射为 `default`。只影响这个 buffer，其它 markdown buffer 的行为不变。回退到 special-mode（未装 markdown-mode 或 `ai-explain-use-markdown-mode` 为 nil）时不生效。想临时切换可在 buffer 里执行 `M-x markdown-toggle-markup-hiding`。
 
 ### 已知限制
 

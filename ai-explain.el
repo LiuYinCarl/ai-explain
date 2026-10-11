@@ -923,10 +923,6 @@ USER-INPUT 非 nil 时给这段文本打上 `ai-explain--input-property' 属性�
      ((string-match-p "sh\\|shell" name) "bash")
      (t (replace-regexp-in-string "-mode\\'" "" name)))))
 
-(defun ai-explain--quote-block (text)
-  "把 TEXT 的每行加上 `> ' 前缀，作为 markdown 引用块展示（与回答正文区分）。"
-  (concat "> " (string-join (split-string text "\n") "\n> ")))
-
 ;;;###autoload
 (defun ai-explain-region (beg end)
   "用当前后端解释选中的区域 (BEG END)，结果实时显示到 *ai-explain* buffer.
@@ -946,8 +942,7 @@ USER-INPUT 非 nil 时给这段文本打上 `ai-explain--input-property' 属性�
     (ai-explain--insert
      (format "## 解释 %s:%d-%d\n\n%s\n\n"
              (file-name-nondirectory file) start-line end-line
-             (ai-explain--quote-block
-              (format "```%s\n%s\n```" lang (string-trim-right code))))
+             (format "```%s\n%s\n```" lang (string-trim-right code)))
      t)
     (deactivate-mark)
     (ai-explain--send prompt source)))

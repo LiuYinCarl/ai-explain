@@ -674,7 +674,7 @@ plist 格式见文件注释。"
 
 (defconst ai-explain--input-property 'ai-explain-user-input
   "标记用户输入块的文本属性.
-用户发起的 `## 解释' / `## 追问' 整块（标题及引用内容）都会被打上该属性，
+用户发起的输入块（`## 解释' / `## 追问' 标题）整块都会被打上该属性，
 作为 `ai-explain-goto-prev-input' / `ai-explain-goto-next-input' 的跳转锚点；
 AI 回答不打属性，避免回答里的 markdown 标题被误判。")
 
@@ -962,9 +962,9 @@ USER-INPUT 非 nil 时给这段文本打上 `ai-explain--input-property' 属性�
   (when (string-blank-p question)
     (user-error "问题不能为空"))
   (ai-explain--check-not-busy)
-  ;; 问题用 > 引用块展示，与回答正文区分开；"追问" 与问题同行、不单独占一行
+  ;; 与 `## 解释' 风格一致：标签与问题同行、不单独占一行
   (ai-explain--insert
-   (format "%s\n\n" (ai-explain--quote-block (concat "**追问**：" question)))
+   (format "## 追问：%s\n\n" question)
    t)
   (ai-explain--send question))
 
@@ -1015,13 +1015,13 @@ USER-INPUT 非 nil 时给这段文本打上 `ai-explain--input-property' 属性�
 
 ;;;###autoload
 (defun ai-explain-goto-prev-input ()
-  "跳转到上一个用户输入（`## 解释' / `## 追问'）."
+  "跳转到上一个用户输入（解释 / 追问）."
   (interactive)
   (ai-explain--goto-input -1))
 
 ;;;###autoload
 (defun ai-explain-goto-next-input ()
-  "跳转到下一个用户输入（`## 解释' / `## 追问'）."
+  "跳转到下一个用户输入（解释 / 追问）."
   (interactive)
   (ai-explain--goto-input 1))
 

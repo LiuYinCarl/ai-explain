@@ -34,7 +34,7 @@ one JSON line, inserts text via `ai-explain--insert`, calls `ai-explain--turn-do
 of turn) -> text appears in `*ai-explain*`.
 
 User-input blocks (the region explanation heading and the follow-up question block,
-which `ai-explain-ask` renders inline as `> **追问**：...`) are tagged with the text
+which `ai-explain-ask` renders as a `## 追问：<question>` heading) are tagged with the text
 property `ai-explain--input-property` by passing a non-nil `USER-INPUT` arg to `ai-explain--insert`.
 `ai-explain-goto-prev-input` / `ai-explain-goto-next-input` (bound to `M-p` / `M-n`) walk
 that property via `ai-explain--input-anchors`, so they never land inside an AI reply even
@@ -49,8 +49,8 @@ called unconditionally from the mode body so it also overrides a global
 `markdown-hide-markup`). The same function overrides `markdown-list-item-bullets`
 buffer-locally with `ai-explain-list-bullet` (default `•`) so lists don't render with
 markdown-mode's large default bullet `●`. The mode body also does
-`(face-remap-add-relative 'markdown-blockquote-face 'default)` so quote blocks (which is
-how user messages and code are shown) don't inherit the often-too-dark
+`(face-remap-add-relative 'markdown-blockquote-face 'default)` so quote blocks (used for
+the region's quoted code) don't inherit the often-too-dark
 `font-lock-doc-face`. All are buffer-local, so other markdown buffers
 are unaffected. It only exists in the `markdown-mode` branch of the mode definition; the
 `special-mode` fallback cannot render, so the option has no effect there.

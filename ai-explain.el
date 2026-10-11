@@ -62,6 +62,12 @@
 （如 `M-x ai-explain-mode`）才生效。"
   :type 'boolean)
 
+(defcustom ai-explain-list-bullet "•"
+  "隐藏 markdown 标记时，列表项使用的符号（替换 `-` / `*` / `+`）。
+只在 *ai-explain* buffer、且 `ai-explain-hide-markup' 非 nil 时生效，
+各层级统一使用该符号。默认是一个小圆点，避免 markdown-mode 默认的大圆圈 `●'。"
+  :type 'string)
+
 (defcustom ai-explain-prompt-template
   "请用中文解释以下代码。文件：%s（%s，第 %d-%d 行）。
 要求：
@@ -623,11 +629,14 @@ plist 格式见文件注释。"
 (defun ai-explain--apply-markup-hiding (enable)
   "在当前 *ai-explain* buffer 中按 ENABLE 打开/关闭 markdown 标记隐藏.
 通过 buffer-local 地设置 markdown-mode 的 `markdown-hide-markup' 实现，只影响
-本 buffer，不动其它 markdown buffer。只在 markdown-mode 可用时调用；无条件
+本 buffer，不动其它 markdown buffer。列表符号同时覆盖为 `ai-explain-list-bullet'，
+避免 markdown-mode 默认的大圆圈 `●'。只在 markdown-mode 可用时调用；无条件
 调用可覆盖全局 `markdown-hide-markup' 或上一次 mode 初始化留下的状态。
 用 `set'+`make-local-variable' 而非 `setq-local'，以免 markdown-mode 未安装时
 在 byte-compile 阶段报 free variable 警告。"
   (set (make-local-variable 'markdown-hide-markup) enable)
+  (set (make-local-variable 'markdown-list-item-bullets)
+       (list ai-explain-list-bullet))
   (if enable
       (add-to-invisibility-spec 'markdown-markup)
     (remove-from-invisibility-spec 'markdown-markup)))
@@ -639,6 +648,9 @@ plist 格式见文件注释。"
       (read-only-mode 1)
       (visual-line-mode 1)
       (ai-explain--apply-markup-hiding ai-explain-hide-markup)
+      ;; 引用块用的 markdown-blockquote-face 继承 font-lock-doc-face，在不少主题下
+      ;; 是偏暗的灰，用户消息/代码引用会看不清；buffer-local 重映射为 default
+      (face-remap-add-relative 'markdown-blockquote-face 'default)
       (setq-local mode-line-format
                   (append (default-value 'mode-line-format)
                           '((:eval (ai-explain--mode-line))))))
@@ -950,9 +962,9 @@ USER-INPUT 非 nil 时给这段文本打上 `ai-explain--input-property' 属性�
   (when (string-blank-p question)
     (user-error "问题不能为空"))
   (ai-explain--check-not-busy)
-  ;; 问题用 > 引用块展示，与回答正文区分开
+  ;; 问题用 > 引用块展示，与回答正文区分开；"追问" 与问题同行、不单独占一行
   (ai-explain--insert
-   (format "## 追问\n\n%s\n\n" (ai-explain--quote-block question))
+   (format "%s\n\n" (ai-explain--quote-block (concat "**追问**：" question)))
    t)
   (ai-explain--send question))
 

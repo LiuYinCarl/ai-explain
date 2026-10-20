@@ -18,6 +18,7 @@ https://github.com/user-attachments/assets/4342856e-86d5-404a-a6fa-fc8391af4d16
 - **markdown 渲染**：对话 buffer 默认使用 markdown-mode（只读），标题和代码块有语法高亮
 - **标记符号隐藏**：默认隐藏 `##` 标题层级、`**` 强调、代码围栏等 markdown 标记符号，只保留渲染后的效果；列表符号改为小圆点 `•`（`ai-explain-hide-markup` 可关）
 - **快速跳转**：`M-p` / `M-n` 在 `*ai-explain*` buffer 里跳到上一个/下一个用户输入，长对话回看不用手动翻
+- **对话记录按天落盘**：每轮问答自动追加保存到 `~/.emacs.d/ai-explain/2025-10-21.md`（markdown，内容与对话 buffer 完全一致），一轮结束、关闭 buffer 或退出 Emacs 时都会补写，中途打断的回复也不会丢；`ai-explain-log-dir` 可改目录、设为 nil 关闭，方便日后构建个人知识库
 - **后端可见**：`*ai-explain*` 的 mode-line 常驻显示当前后端（回复中时显示 `[kimi:回复中]`），提问时 minibuffer 也会提示一次
 - **零账号处理**：登录、鉴权完全由 CLI 自己负责，插件不碰任何 token
 
@@ -123,6 +124,10 @@ buffer 是只读的，这些键不会干扰任何文本输入；提问在 minibu
 ;; 解释代码用的 prompt 模板，6 个 % 依次是：
 ;; 文件路径、语言、起始行、结束行、代码块语言标识、代码内容
 (setq ai-explain-prompt-template "请用中文解释以下代码……")
+
+;; 对话记录保存目录（nil 表示不保存），默认 ~/.emacs.d/ai-explain/
+;; 每个自然日一个 markdown 文件（如 2025-10-21.md），当天对话全部追加其中
+(setq ai-explain-log-dir "~/.emacs/ai-explain")
 ```
 
 ## 设计
@@ -239,13 +244,27 @@ ACP（[Agent Client Protocol](https://agentclientprotocol.com)）是编辑器与
 
 `ai-explain-hide-markup`（默认开）复用 markdown-mode 的 `markdown-hide-markup`：在 `*ai-explain*` buffer 里 buffer-local 地隐藏 `##` 标题层级、`**` 强调、`` ` `` 行内代码、代码块围栏、链接标记等符号，同时保留字体高亮（face）。列表符号覆盖为 `ai-explain-list-bullet`（默认小圆点 `•`，各层级统一，避免默认的大圆圈 `●`）。另外，markdown-mode 的 `markdown-blockquote-face` 继承 `font-lock-doc-face`（部分主题下偏暗、不易看清），插件在本 buffer 内把它 buffer-local 重映射为 `default`。只影响这个 buffer，其它 markdown buffer 的行为不变。回退到 special-mode（未装 markdown-mode 或 `ai-explain-use-markdown-mode` 为 nil）时不生效。想临时切换可在 buffer 里执行 `M-x markdown-toggle-markup-hiding`。
 
+### 对话记录（按天落盘）
+
+每轮回复结束（`ai-explain--turn-done`）时，把 buffer 中上次保存后新增的内容追加写入
+`ai-explain-log-dir/YYYY-MM-DD.md`；关闭 `*ai-explain*` buffer（或退出 Emacs）时通过
+`kill-buffer-hook` 把剩余内容补写，因此被中断的回复、发送失败的问题块也不会丢。文件
+内容与 buffer 完全一致（提问块、回答、分隔符），可直接作为 markdown 知识库素材。实现要点：
+
+- buffer 只读且只追加，用 buffer-local 的 `ai-explain--log-saved-pos` 记录上次写盘
+  位置，只追加新增部分；一天内多次打开 buffer / 重启 Emacs 都会续写同一个文件
+- 该位置**只在写盘成功后推进**：目录创建或写入失败时整段重试，不丢记录
+- 写盘前先清掉等待动画，避免 spinner 帧混进记录；静态引导说明（buffer 顶部的那段
+  `# AI 代码讲解`）不写入日志
+- 跨零点自动切到新一天的文件；设 `ai-explain-log-dir` 为 nil 可整体关闭
+
 ### 已知限制
 
 - **CLI 拥有工具权限**：kimi ACP 会话被切到 auto 权限模式、pi 默认带工具，解释代码时它们可能会读取你的项目文件（通常是优点——能结合上下文；不想要可在 `:build-args` 里给 pi-oneshot 加 `--no-tools`）
 - 同一时刻一个会话只能有一个进行中的请求，回复未完成时再提问会被拒绝并提示
 - 按 `s` 停止的实现因后端而异：pi 用 `abort` 优雅中断（进程、会话都保留，中断迟迟不生效时再按一次 `s` 杀进程兜底）；kimi ACP 未实现 `session/cancel`，只能杀进程，session id 已保留，下次提问自动重启并恢复上下文，代价是多一次进程启动
 - ACP 握手有 15 秒看门狗：对端无响应时判定失败并提示（常见原因是 CLI 未登录）
-- 关闭 `*ai-explain*` buffer 会同时结束后端进程，重开后是新会话（会话状态是 buffer-local 的）
+- 关闭 `*ai-explain*` buffer 会同时结束后端进程，重开后显示的是新会话（会话状态是 buffer-local 的）；对话记录已按天落盘（见「对话记录」），历史不会丢
 - `M-p` / `M-n` 依据用户输入块上的文本属性跳转：重新加载本文件后，**已打开的旧 `*ai-explain*` buffer** 里历史内容没有该属性，需按 `n` 开新会话、或让新内容插入后才会成为跳转目标
 
 ## 文件

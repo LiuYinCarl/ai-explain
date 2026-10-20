@@ -14,6 +14,8 @@
 ;;   选中一段代码后  M-x ai-explain-region   用中文解释选中的代码
 ;;                   M-x ai-explain-ask              直接输入问题追问（同一会话）
 ;;   在 *ai-explain* buffer 中: a/A 追问, s 停止回复, n 开启新会话, b 切换后端, q 关闭窗口, ? 按键帮助
+;; 对话记录: 每轮问答按天自动追加到 `ai-explain-log-dir'（默认 ~/.emacs.d/ai-explain/），
+;; 关闭 buffer / Emacs 时剩余内容也会落盘，便于构建个人知识库。
 ;;
 ;; 切换后端:
 ;;   (setq ai-explain-backend 'pi)   ; 默认 'kimi
@@ -67,6 +69,14 @@
 只在 *ai-explain* buffer、且 `ai-explain-hide-markup' 非 nil 时生效，
 各层级统一使用该符号。默认是一个小圆点，避免 markdown-mode 默认的大圆圈 `●'。"
   :type 'string)
+
+(defcustom ai-explain-log-dir (expand-file-name "ai-explain" user-emacs-directory)
+  "对话记录保存目录，nil 表示不保存.
+每个自然日一个 markdown 文件（形如 `2025-10-21.md'），当天所有问答追加
+写入其中；内容与 *ai-explain* buffer 完全一致（提问块、回答、分隔符）。
+一轮回复结束和 buffer 被关闭时自动落盘，方便日后构建个人知识库。"
+  :type '(choice (const :tag "不保存对话记录" nil)
+                 (directory :tag "保存目录")))
 
 (defcustom ai-explain-prompt-template
   "请用中文解释以下代码。文件：%s（%s，第 %d-%d 行）。
@@ -136,6 +146,13 @@
   "非 nil 表示当前这条 assistant 消息已经流过文本（pi 后端用）.
 工具调用回合的 assistant 消息没有文本，其 message_end 不应补换行，
 否则等待工具执行期间 buffer 里会多出空行。")
+
+(defvar-local ai-explain--log-saved-pos nil
+  "对话记录上次写盘时 buffer 末尾的位置（它到 point-max 之间是未落盘内容）.
+只在写盘成功后推进，失败时下次保存会重试整段，保证记录不丢。")
+;; 重新初始化 mode（如 M-x ai-explain-mode）时保留上次写盘位置，
+;; 避免整个 buffer 的内容被重复追加进当天的日志文件
+(put 'ai-explain--log-saved-pos 'permanent-local t)
 
 ;;; ACP 通用后端（常驻进程）
 ;;
@@ -669,7 +686,10 @@ plist 格式见文件注释。"
       (with-current-buffer (get-buffer-create ai-explain-buffer-name)
         (insert "# AI 代码讲解\n\n选中代码后 `M-x ai-explain-region` 解释；本 buffer 中： `a` 或 `A` 追问，`s` 停止回复，`n` 新会话，`b` 切换后端，`q` 关闭，`?` 查看全部按键。\n\n")
         (ai-explain-mode)
+        ;; 静态的引导说明不进日志：写盘分界点从它之后开始
+        (setq ai-explain--log-saved-pos (point-max))
         (add-hook 'kill-buffer-hook #'ai-explain--kill-buffer-cleanup nil t)
+        (add-hook 'kill-buffer-hook #'ai-explain--log-save nil t)
         (current-buffer))))
 
 (defconst ai-explain--input-property 'ai-explain-user-input
@@ -698,7 +718,34 @@ USER-INPUT 非 nil 时给这段文本打上 `ai-explain--input-property' 属性�
 在 *ai-explain* buffer 中调用。"
   (ai-explain--spinner-stop)
   (setq ai-explain--busy nil)
-  (ai-explain--insert "\n---\n\n"))
+  (ai-explain--insert "\n---\n\n")
+  (ai-explain--log-save))
+
+;;; 对话记录（按天落盘，方便构建知识库）
+
+(defun ai-explain--log-save ()
+  "把 *ai-explain* buffer 中上次保存后新增的内容追加写入今天的记录文件.
+在 *ai-explain* buffer 中调用；`ai-explain-log-dir' 为 nil 时什么都不做。
+buffer 只读且只追加，因此用 `ai-explain--log-saved-pos' 作分界；
+写盘成功才推进该位置，失败时下次保存会重试整段，保证记录不丢。
+一轮回复结束（`ai-explain--turn-done'）和 buffer 被关闭时调用。"
+  (when ai-explain-log-dir
+    ;; 先清掉可能残留的 spinner 动画，避免动画帧被写进记录
+    (ai-explain--spinner-stop)
+    (let* ((dir (expand-file-name ai-explain-log-dir))
+           (file (expand-file-name (concat (format-time-string "%Y-%m-%d") ".md")
+                                   dir))
+           (start (or ai-explain--log-saved-pos (point-min))))
+      (when (> (point-max) start)
+        (let ((text (buffer-substring-no-properties start (point-max))))
+          (condition-case err
+              (progn
+                (make-directory dir t)
+                (write-region text nil file t nil)
+                (setq ai-explain--log-saved-pos (point-max)))
+            (error
+             (message "ai-explain: 保存对话记录失败（下次保存时重试）: %s"
+                      (error-message-string err)))))))))
 
 (defun ai-explain--scroll-to-end ()
   "让所有显示 *ai-explain* 的窗口滚动到末尾。"

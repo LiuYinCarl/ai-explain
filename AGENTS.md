@@ -33,6 +33,16 @@ partial line in the process property `pending`) -> the backend's `:handle-line` 
 one JSON line, inserts text via `ai-explain--insert`, calls `ai-explain--turn-done` at end
 of turn) -> text appears in `*ai-explain*`.
 
+Conversation logging: `ai-explain--turn-done` (end of every turn) and the buffer's
+`kill-buffer-hook` run `ai-explain--log-save`, which appends the buffer text after the
+buffer-local `ai-explain--log-saved-pos` to `ai-explain-log-dir/YYYY-MM-DD.md`
+(`ai-explain-log-dir` nil disables; default `~/.emacs.d/ai-explain/`). The log is an exact
+copy of the visible buffer text (the static help header is excluded by initializing the
+position after it). The position advances only after a successful write, so a failed save
+retries the whole chunk next time; the spinner is stopped first so spinner frames never
+reach the log. New code paths that insert user/AI content need no extra save call — the
+next turn-done or buffer kill picks it up.
+
 User-input blocks (the region explanation heading and the follow-up question block,
 which `ai-explain-ask` renders as a `## 追问：<question>` heading) are tagged with the text
 property `ai-explain--input-property` by passing a non-nil `USER-INPUT` arg to `ai-explain--insert`.
@@ -91,9 +101,10 @@ handshake responses are routed by matching `acp-handshake-id`. A 15s watchdog
 - **`eq` guards discard stale output.** `ai-explain--filter` and `ai-explain--sentinel`
   only act when `(eq ai-explain--process proc)`. Any new async path needs the same guard.
 - **State is buffer-local** (`ai-explain--session-id`, `--process`, `--busy`,
-  `--pi-saw-text`, spinner vars). `--session-id` persists on the `*ai-explain*` buffer
-  across process restarts so the conversation can be resumed. Closing the buffer kills the
-  backend process (via `kill-buffer-hook`), so reopening starts fresh.
+  `--pi-saw-text`, spinner vars, `--log-saved-pos`). `--session-id` persists on the
+  `*ai-explain*` buffer across process restarts so the conversation can be resumed.
+  Closing the buffer kills the backend process (via `kill-buffer-hook`), so reopening
+  starts fresh.
 - **`ai-explain--insert` bypasses `read-only-mode`** with `inhibit-read-only` and stops
   the spinner. Always insert through it, not raw `insert`.
 - **`--turn-done` is mandatory** at the end of every turn, including error paths; it
@@ -112,6 +123,11 @@ handshake responses are routed by matching `acp-handshake-id`. A 15s watchdog
 - The spinner is a 0.1s repeating timer bound to the buffer; it must be stopped on every
   terminal path (content arrival, turn end, process exit, user stop, buffer kill) or it
   leaks a timer holding the buffer.
+- **`ai-explain--log-save` must advance `--log-saved-pos` only on successful write** and
+  must call `ai-explain--spinner-stop` first (spinner frames must not reach the log). It
+  runs from `--turn-done` and the buffer's `kill-buffer-hook`; it is safe to call
+  redundantly (no-op when nothing new). `--log-saved-pos` is `permanent-local` so
+  re-initializing the mode doesn't reset it and re-log the whole buffer.
 
 ## Adding a backend
 
